@@ -1,0 +1,74 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Python (ai-service)
+ai-service/__pycache__/
+ai-service/**/*.pyc
+ai-service/**/*.pyo
+ai-service/.venv/
+ai-service/venv/
+ai-service/.env
+
+# Go (backend)
+backend/bin/
+backend/**/*.exe
+backend/**/*.out
+backend/**/*.test
+backend/vendor/
+backend/.env
+
+# Node (frontend)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.next/cache/
+
+# Upload & output files (IMPORTANT - jangan ke push)
+uploads/
+outputs/
+backend/uploads/
+backend/outputs/
+ai-service/uploads/
+ai-service/outputs/
+
+# Generated files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.json
+*.md
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
+
+# Python cache global
+__pycache__/
+*.pyc
+
+# Go modules cache (optional local)
+go.work
+
+# coverage
+coverage.out
+*.cover
+
+# misc
+*.sqlite
+*.db

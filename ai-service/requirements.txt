@@ -1,0 +1,37 @@
+fastapi
+uvicorn[standard]
+python-multipart
+
+# PDF Processing
+pymupdf
+pdfplumber
+pypdf2
+
+# OCR - GOT-OCR2.0
+accelerate
+
+# Image processing
+Pillow
+opencv-python-headless
+pdf2image
+
+# AI
+google-genai
+
+# Table Transformer (Microsoft)
+torch
+torchvision
+transformers
+timm
+
+# NLP / Chunking
+sentence-transformers
+numpy
+scikit-learn
+
+# Utilities
+pydantic
+pydantic-settings
+python-dotenv
+aiofiles
+tqdm

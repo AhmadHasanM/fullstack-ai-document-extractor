@@ -1,0 +1,90 @@
+version: "3.9"
+
+services:
+  ai_postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ai_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+      POSTGRES_DB: pdf_extractor
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d pdf_extractor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  ai_rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ai_rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  ai_backend:
+    build:
+      context: ./backend
+    container_name: ai_backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://admin:admin123@ai_postgres:5432/pdf_extractor?sslmode=disable
+      RABBITMQ_URL: amqp://guest:guest@ai_rabbitmq:5672/
+      PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      ai_postgres:
+        condition: service_healthy
+      ai_rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+
+  ai_service:
+    build:
+      context: ./ai-service
+    container_name: ai_service
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://admin:admin123@ai_postgres:5432/pdf_extractor
+      RABBITMQ_URL: amqp://guest:guest@ai_rabbitmq:5672/
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "8000:8000"
+    depends_on:
+      ai_postgres:
+        condition: service_healthy
+      ai_rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+
+  ai_frontend:
+    build:
+      context: ./frontend
+    container_name: ai_frontend
+    restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - ai_backend
+
+volumes:
+  postgres_data:
