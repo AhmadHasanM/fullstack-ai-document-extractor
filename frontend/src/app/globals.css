@@ -1,0 +1,309 @@
+@import "tailwindcss";
+
+/* Marquee Animation */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  animation: marquee 20s linear infinite;
+}
+
+:root {
+  /* Colors - Black & White Core */
+  --color-primary: #000000;
+  --color-on-primary: #ffffff;
+  --color-canvas: #ffffff;
+  --color-ink: #000000;
+  --color-inverse-canvas: #000000;
+  --color-inverse-ink: #ffffff;
+
+  /* Surface Colors */
+  --color-surface-soft: #f7f7f5;
+  --color-hairline: #e6e6e6;
+  --color-hairline-soft: #f1f1f1;
+
+  /* Color Block Sections - Pastels */
+  --color-block-lime: #dceeb1;
+  --color-block-lilac: #c5b0f4;
+  --color-block-cream: #f4ecd6;
+  --color-block-mint: #c8e6cd;
+  --color-block-pink: #efd4d4;
+  --color-block-coral: #f3c9b6;
+  --color-block-navy: #1f1d3d;
+
+  /* Accent */
+  --color-accent-magenta: #ff3d8b;
+  --color-semantic-success: #1ea64a;
+
+  /* Typography */
+  --font-sans: 'Inter', 'SF Pro Display', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+  /* Border Radius */
+  --radius-xs: 2px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+  --radius-pill: 50px;
+  --radius-full: 9999px;
+
+  /* Spacing */
+  --space-hair: 1px;
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+  --space-section: 96px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-weight: 320;
+  line-height: 1.45;
+  letter-spacing: -0.26px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Typography Classes */
+.text-display-xl {
+  font-size: 86px;
+  font-weight: 340;
+  line-height: 1.00;
+  letter-spacing: -1.72px;
+}
+
+.text-display-lg {
+  font-size: 64px;
+  font-weight: 340;
+  line-height: 1.10;
+  letter-spacing: -0.96px;
+}
+
+.text-headline {
+  font-size: 26px;
+  font-weight: 540;
+  line-height: 1.35;
+  letter-spacing: -0.26px;
+}
+
+.text-subhead {
+  font-size: 26px;
+  font-weight: 340;
+  line-height: 1.35;
+  letter-spacing: -0.26px;
+}
+
+.text-card-title {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.text-body-lg {
+  font-size: 20px;
+  font-weight: 330;
+  line-height: 1.40;
+  letter-spacing: -0.14px;
+}
+
+.text-body {
+  font-size: 18px;
+  font-weight: 320;
+  line-height: 1.45;
+  letter-spacing: -0.26px;
+}
+
+.text-body-sm {
+  font-size: 16px;
+  font-weight: 330;
+  line-height: 1.45;
+  letter-spacing: -0.14px;
+}
+
+.text-link {
+  font-size: 20px;
+  font-weight: 480;
+  line-height: 1.40;
+  letter-spacing: -0.10px;
+}
+
+.text-button {
+  font-size: 20px;
+  font-weight: 480;
+  line-height: 1.40;
+  letter-spacing: -0.10px;
+}
+
+.text-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.30;
+  letter-spacing: 0.54px;
+  text-transform: uppercase;
+}
+
+.text-caption {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.00;
+  letter-spacing: 0.60px;
+  text-transform: uppercase;
+}
+
+/* Button Styles */
+.btn-primary {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  font: var(--font-sans);
+  font-size: 20px;
+  font-weight: 480;
+  line-height: 1.40;
+  letter-spacing: -0.10px;
+  border-radius: var(--radius-pill);
+  padding: 10px 20px;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
+
+.btn-secondary {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font: var(--font-sans);
+  font-size: 20px;
+  font-weight: 480;
+  line-height: 1.40;
+  letter-spacing: -0.10px;
+  border-radius: var(--radius-pill);
+  padding: 8px 18px 10px;
+  border: 1px solid var(--color-hairline);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-surface-soft);
+}
+
+.btn-icon-circular {
+  background-color: var(--color-surface-soft);
+  color: var(--color-ink);
+  border-radius: var(--radius-full);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.btn-icon-circular:hover {
+  background-color: var(--color-hairline-soft);
+}
+
+/* Input Styles */
+.text-input {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-size: 18px;
+  font-weight: 320;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  border: 1px solid var(--color-hairline);
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.text-input:focus {
+  border-color: var(--color-primary);
+}
+
+/* Card Styles */
+.card {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  border: 1px solid var(--color-hairline);
+}
+
+/* Color Block Sections */
+.color-block-lime {
+  background-color: var(--color-block-lime);
+  color: var(--color-ink);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xxl);
+}
+
+.color-block-lilac {
+  background-color: var(--color-block-lilac);
+  color: var(--color-ink);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xxl);
+}
+
+.color-block-cream {
+  background-color: var(--color-block-cream);
+  color: var(--color-ink);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xxl);
+}
+
+.color-block-navy {
+  background-color: var(--color-block-navy);
+  color: var(--color-inverse-ink);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xxl);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .text-display-xl {
+    font-size: 48px;
+    letter-spacing: -0.5px;
+  }
+
+  .text-display-lg {
+    font-size: 40px;
+    letter-spacing: -0.3px;
+  }
+
+  .color-block-lime,
+  .color-block-lilac,
+  .color-block-cream,
+  .color-block-navy {
+    border-radius: 0;
+    padding: var(--space-lg);
+  }
+}
