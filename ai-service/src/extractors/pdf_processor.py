@@ -9,6 +9,7 @@ from .table_extractor import TableExtractor
 from .image_extractor import ImageExtractor
 from .ocr_processor import OCRProcessor
 from ..services.markdown_formatter import MarkdownFormatter
+from ..services.embedding_service import EmbeddingService
 from ..database.db import Database
 from ..config import settings
 
@@ -55,6 +56,9 @@ class PDFProcessor:
         # ganti ke Surya OCR lokal
         self.ocr_processor = OCRProcessor()
 
+        # embedding service (lazy init, fallback gracefully)
+        self.embedding_service = EmbeddingService()
+
     async def process(self) -> Dict:
         """Process PDF and return results"""
         print(f"📄 Processing PDF: {self.pdf_path}")
@@ -98,17 +102,21 @@ class PDFProcessor:
             markdown_content
         )
 
-        # Save chunks to database
+        # Step 7: Generate embeddings for each chunk
         if chunks:
-            print(f"💾 Saving {len(chunks)} chunks to database...")
+            print(f"🧠 Generating embeddings for {len(chunks)} chunks...")
+            await self._generate_chunk_embeddings(chunks)
+
+            print(f"💾 Saving {len(chunks)} chunks (with embeddings) to database...")
             db = Database()
             await db.connect()
             await db.save_chunks(chunks)
-            print(f"✅ Chunks saved successfully")
+            print(f"✅ Chunks + embeddings saved successfully")
         else:
             print("⚠️ No chunks to save")
 
-        # Di paling bawah sebelum return
+        chunks_with_embeddings = sum(1 for c in chunks if c.get("embedding"))
+        print(f"📊 Chunks with embeddings: {chunks_with_embeddings}/{len(chunks) or 0}")
 
         return {
             "document_id": self.document_id,
@@ -116,6 +124,7 @@ class PDFProcessor:
             "metadata": metadata,
             "output_paths": output_paths,
             "chunks_count": len(chunks),
+            "chunks_with_embeddings": chunks_with_embeddings,
             "images_count": len(images),
             "status": "completed"
         }
@@ -351,3 +360,40 @@ class PDFProcessor:
         )
 
         return chunks
+
+    async def _generate_chunk_embeddings(
+        self,
+        chunks: List[Dict]
+    ) -> None:
+        """Generate embeddings for chunks in batches.
+
+        Attaches embedding to each chunk dict in-place.
+        If embedding fails, chunk is saved without embedding (graceful fallback).
+        """
+        texts = [c.get("content", "") for c in chunks]
+        if not texts:
+            return
+
+        valid_indices = [i for i, t in enumerate(texts) if t.strip()]
+        valid_texts = [texts[i] for i in valid_indices]
+
+        if not valid_texts:
+            print("⚠️ No chunk content to embed")
+            return
+
+        print(f"🧠 Generating embeddings for {len(valid_texts)} chunks "
+              f"(batch size={len(valid_texts)})")
+
+        embeddings = await self.embedding_service.generate_embeddings_batch(
+            valid_texts
+        )
+
+        if embeddings is not None and len(embeddings) == len(valid_indices):
+            for idx, emb in zip(valid_indices, embeddings):
+                chunks[idx]["embedding"] = emb
+            dim = len(embeddings[0]) if embeddings else 0
+            print(f"✅ Embeddings attached to {len(embeddings)} chunks, "
+                  f"dim={dim}, first_3_values={embeddings[0][:3] if embeddings else 'N/A'}")
+        else:
+            print(f"⚠️ Embedding generation returned no results ({len(embeddings) if embeddings is not None else 0} embeddings for {len(valid_indices)} texts), "
+                  f"chunks will be saved without embeddings")

@@ -13,7 +13,7 @@ type User struct {
 
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	Password string `json:"password" binding:"required,min=8"`
 	Name     string `json:"name"`
 }
 
@@ -29,9 +29,10 @@ type AuthResponse struct {
 
 type Document struct {
 	ID               string     `json:"id"`
+	UserID           string     `json:"user_id"`
 	Filename         string     `json:"filename"`
 	OriginalFilename string     `json:"original_filename"`
-	FilePath         string     `json:"file_path"`
+	FilePath         string     `json:"-"`
 	FileSize         int64      `json:"file_size"`
 	PDFType          *string    `json:"pdf_type,omitempty"`
 	Status           string     `json:"status"`
@@ -42,12 +43,12 @@ type Document struct {
 }
 
 type DocumentOutput struct {
-	ID            string    `json:"id"`
-	DocumentID    string    `json:"document_id"`
-	MarkdownPath  string    `json:"markdown_path"`
-	JSONPath      string    `json:"json_path"`
-	ImagesFolder  string    `json:"images_folder"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	DocumentID   string    `json:"document_id"`
+	MarkdownPath string    `json:"markdown_path"`
+	JSONPath     string    `json:"json_path"`
+	ImagesFolder string    `json:"images_folder"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type DocumentChunk struct {
@@ -62,20 +63,21 @@ type DocumentChunk struct {
 }
 
 type ProcessingQueue struct {
-	ID            string     `json:"id"`
-	DocumentID    string     `json:"document_id"`
-	Priority      int        `json:"priority"`
-	Status        string     `json:"status"`
-	RetryCount    int        `json:"retry_count"`
-	MaxRetries    int        `json:"max_retries"`
-	ErrorMessage  *string    `json:"error_message,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	ID           string     `json:"id"`
+	DocumentID   string     `json:"document_id"`
+	Priority     int        `json:"priority"`
+	Status       string     `json:"status"`
+	RetryCount   int        `json:"retry_count"`
+	MaxRetries   int        `json:"max_retries"`
+	ErrorMessage *string    `json:"error_message,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 }
 
 type ChatSession struct {
 	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
 	DocumentID *string   `json:"document_id,omitempty"`
 	Title      string    `json:"title"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -84,6 +86,7 @@ type ChatSession struct {
 
 type ChatMessage struct {
 	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
 	DocumentID string    `json:"document_id"`
 	SessionID  string    `json:"session_id"`
 	Role       string    `json:"role"`
@@ -118,8 +121,8 @@ type ListChatSessionsResponse struct {
 
 type ChatRequest struct {
 	DocumentID string `json:"document_id,omitempty"`
-	Message   string `json:"message" binding:"required"`
-	SessionID string `json:"session_id" binding:"required"`
+	Message    string `json:"message" binding:"required,max=10000"`
+	SessionID  string `json:"session_id" binding:"required"`
 }
 
 type ChatResponse struct {
@@ -130,7 +133,7 @@ type ChatResponse struct {
 
 type ChatHistoryResponse struct {
 	SessionID string         `json:"session_id"`
-	Messages   []ChatMessage `json:"messages"`
+	Messages  []ChatMessage `json:"messages"`
 }
 
 type QueueMessage struct {
@@ -141,5 +144,9 @@ type QueueMessage struct {
 
 type ErrorResponse struct {
 	Error   string `json:"error"`
+	Message string `json:"message"`
+}
+
+type SuccessResponse struct {
 	Message string `json:"message"`
 }

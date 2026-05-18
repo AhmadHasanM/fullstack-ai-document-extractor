@@ -1,25 +1,28 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
 type Config struct {
-	DatabaseURL  string
-	RabbitMQURL  string
-	AIServiceURL string
-	Port         string
-	UploadsDir   string
-	OutputsDir   string
-	MaxFileSize  int64
-	JWTSecret    string
+	DatabaseURL        string
+	RabbitMQURL        string
+	AIServiceURL       string
+	Port               string
+	UploadsDir         string
+	OutputsDir         string
+	MaxFileSize        int64
+	JWTSecret          string
+	CORSAllowedOrigins string
+	IsProduction       bool
 }
 
-func NewConfig() *Config {
+func NewConfig() (*Config, error) {
 	rootDir := getProjectRoot()
 
-	return &Config{
+	cfg := &Config{
 		DatabaseURL: getEnv(
 			"DATABASE_URL",
 			"postgresql://admin:admin123@localhost:5432/pdf_extractor",
@@ -49,11 +52,21 @@ func NewConfig() *Config {
 
 		MaxFileSize: 100 * 1024 * 1024,
 
-		JWTSecret: getEnv(
-			"JWT_SECRET",
-			"your-super-secret-jwt-key-change-in-production",
+		JWTSecret: getEnv("JWT_SECRET", ""),
+
+		CORSAllowedOrigins: getEnv(
+			"CORS_ALLOWED_ORIGINS",
+			"http://localhost:3000",
 		),
+
+		IsProduction: os.Getenv("GIN_MODE") == "release",
 	}
+
+	if cfg.JWTSecret == "" {
+		return nil, fmt.Errorf("JWT_SECRET environment variable is required")
+	}
+
+	return cfg, nil
 }
 
 func getProjectRoot() string {

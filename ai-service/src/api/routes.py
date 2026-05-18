@@ -427,6 +427,7 @@ async def regenerate_document_chunks(document_id: str):
 
         # Chunk the document
         from ..services.document_chunker import DocumentChunker
+        from ..services.embedding_service import EmbeddingService
         chunker = DocumentChunker(
             chunk_size=settings.CHUNK_SIZE,
             chunk_overlap=settings.CHUNK_OVERLAP
@@ -435,19 +436,35 @@ async def regenerate_document_chunks(document_id: str):
 
         logger.info(f"Created {len(chunks)} chunks")
 
+        # Generate embeddings for each chunk
+        logger.info(f"Generating embeddings for {len(chunks)} chunks...")
+        embedding_service = EmbeddingService()
+        texts = [c.get("content", "") for c in chunks if c.get("content", "").strip()]
+        valid_indices = [i for i, c in enumerate(chunks) if c.get("content", "").strip()]
+
+        if texts:
+            embeddings = await embedding_service.generate_embeddings_batch(texts)
+            if embeddings and len(embeddings) == len(valid_indices):
+                for idx, emb in zip(valid_indices, embeddings):
+                    chunks[idx]["embedding"] = emb
+                logger.info(f"Embeddings attached to {len(embeddings)} chunks")
+
         # Delete existing chunks for this document
         async with db.pool.acquire() as conn:
             await conn.execute("DELETE FROM document_chunks WHERE document_id = $1", document_id)
 
-        # Save new chunks
+        # Save new chunks with embeddings
         await db.save_chunks(chunks)
 
-        logger.info(f"Successfully regenerated {len(chunks)} chunks for document {document_id}")
+        chunks_with_emb = sum(1 for c in chunks if c.get("embedding"))
+        logger.info(f"Successfully regenerated {len(chunks)} chunks "
+                    f"({chunks_with_emb} with embeddings) for document {document_id}")
 
         return {
             "status": "success",
             "document_id": document_id,
-            "chunks_count": len(chunks)
+            "chunks_count": len(chunks),
+            "chunks_with_embeddings": chunks_with_emb
         }
 
     except HTTPException:
@@ -455,6 +472,46 @@ async def regenerate_document_chunks(document_id: str):
     except Exception as e:
         logger.error(f"Error regenerating chunks: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debug/embeddings")
+async def debug_embeddings():
+    """Test embedding pipeline without needing a Gemini API key.
+
+    Returns the raw embedding vector dimensions and preview for a known string.
+    """
+    from ..services.embedding_service import EmbeddingService
+
+    test_text = "This is a test document for embedding verification."
+    es = EmbeddingService()
+    embedding = await es.generate_embedding(test_text)
+
+    if embedding is None:
+        return {
+            "status": "error",
+            "message": "Embedding generation failed. Check logs for details.",
+            "config": {
+                "provider": settings.EMBEDDING_PROVIDER,
+                "model": settings.EMBEDDING_MODEL,
+                "dimension": settings.EMBEDDING_DIMENSION,
+                "gemini_api_key_set": bool(settings.GEMINI_API_KEY),
+            },
+        }
+
+    return {
+        "status": "success",
+        "dimension": len(embedding),
+        "expected_dimension": settings.EMBEDDING_DIMENSION,
+        "dimension_match": len(embedding) == settings.EMBEDDING_DIMENSION,
+        "first_5_values": embedding[:5],
+        "last_5_values": embedding[-5:],
+        "config": {
+            "provider": settings.EMBEDDING_PROVIDER,
+            "model": settings.EMBEDDING_MODEL,
+            "dimension": settings.EMBEDDING_DIMENSION,
+            "gemini_api_key_set": bool(settings.GEMINI_API_KEY),
+        },
+    }
 
 
 @router.post("/documents/reprocess-all")
@@ -474,6 +531,9 @@ async def reprocess_all_documents():
         results = []
         import os
         from ..services.document_chunker import DocumentChunker
+        from ..services.embedding_service import EmbeddingService
+
+        embedding_service = EmbeddingService()
 
         for doc in docs:
             doc_id = str(doc["id"])
@@ -501,11 +561,28 @@ async def reprocess_all_documents():
                 )
                 chunks = chunker.chunk_text(markdown_content, doc_id)
 
+                # Generate embeddings
+                texts = [c.get("content", "") for c in chunks if c.get("content", "").strip()]
+                if texts:
+                    embeddings = await embedding_service.generate_embeddings_batch(texts)
+                    if embeddings and len(embeddings) == len([i for i, c in enumerate(chunks) if c.get("content", "").strip()]):
+                        emb_idx = 0
+                        for i, c in enumerate(chunks):
+                            if c.get("content", "").strip():
+                                chunks[i]["embedding"] = embeddings[emb_idx]
+                                emb_idx += 1
+
                 # Save chunks
                 await db.save_chunks(chunks)
 
-                logger.info(f"Created {len(chunks)} chunks for {doc_id}")
-                results.append({"document_id": doc_id, "status": "success", "chunks": len(chunks)})
+                chunks_with_emb = sum(1 for c in chunks if c.get("embedding"))
+                logger.info(f"Created {len(chunks)} chunks ({chunks_with_emb} with embeddings) for {doc_id}")
+                results.append({
+                    "document_id": doc_id,
+                    "status": "success",
+                    "chunks": len(chunks),
+                    "chunks_with_embeddings": chunks_with_emb
+                })
 
             except Exception as e:
                 logger.error(f"Error processing {doc_id}: {e}")

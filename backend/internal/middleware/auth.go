@@ -13,29 +13,30 @@ import (
 
 func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get JWT secret
-		jwtSecret := cfg.JWTSecret
-		if jwtSecret == "" {
-			jwtSecret = "your-super-secret-jwt-key-change-in-production"
-		}
-
-		// Get Authorization header
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-				Error:   "unauthorized",
-				Message: "Authorization header required",
+		if cfg.JWTSecret == "" {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error:   "server_error",
+				Message: "Authentication not configured",
 			})
 			c.Abort()
 			return
 		}
 
-		// Check Bearer token format
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+				Error:   "unauthorized",
+				Message: "Authentication required",
+			})
+			c.Abort()
+			return
+		}
+
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 				Error:   "unauthorized",
-				Message: "Invalid authorization header format",
+				Message: "Invalid authentication format",
 			})
 			c.Abort()
 			return
@@ -43,12 +44,11 @@ func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 
 		tokenString := parts[1]
 
-		// Parse and validate token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
-			return []byte(jwtSecret), nil
+			return []byte(cfg.JWTSecret), nil
 		})
 
 		if err != nil || !token.Valid {
@@ -60,23 +60,21 @@ func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		// Extract claims
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
 			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 				Error:   "unauthorized",
-				Message: "Invalid token claims",
+				Message: "Invalid token",
 			})
 			c.Abort()
 			return
 		}
 
-		// Store user ID in context
 		userID, ok := claims["user_id"].(string)
-		if !ok {
+		if !ok || userID == "" {
 			c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 				Error:   "unauthorized",
-				Message: "Invalid user ID in token",
+				Message: "Invalid token",
 			})
 			c.Abort()
 			return
@@ -87,12 +85,11 @@ func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
-// OptionalAuthMiddleware - doesn't fail if no token, but extracts user if present
 func OptionalAuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		jwtSecret := cfg.JWTSecret
-		if jwtSecret == "" {
-			jwtSecret = "your-super-secret-jwt-key-change-in-production"
+		if cfg.JWTSecret == "" {
+			c.Next()
+			return
 		}
 
 		authHeader := c.GetHeader("Authorization")
@@ -113,12 +110,12 @@ func OptionalAuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
-			return []byte(jwtSecret), nil
+			return []byte(cfg.JWTSecret), nil
 		})
 
 		if err == nil && token.Valid {
 			if claims, ok := token.Claims.(jwt.MapClaims); ok {
-				if userID, ok := claims["user_id"].(string); ok {
+				if userID, ok := claims["user_id"].(string); ok && userID != "" {
 					c.Set("user_id", userID)
 				}
 			}

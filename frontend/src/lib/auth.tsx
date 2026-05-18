@@ -1,8 +1,8 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL;
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 type User = {
   id: string;
@@ -29,14 +29,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check for stored token on mount
     const storedToken = localStorage.getItem("auth_token");
     const storedUser = localStorage.getItem("auth_user");
 
     if (storedToken && storedUser) {
-      setToken(storedToken);
       try {
-        setUser(JSON.parse(storedUser));
+        const parsedUser = JSON.parse(storedUser) as User;
+        setToken(storedToken);
+        setUser(parsedUser);
       } catch {
         localStorage.removeItem("auth_token");
         localStorage.removeItem("auth_user");
@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     const res = await fetch(`${API}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -53,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!res.ok) {
-      const error = await res.json();
+      const error = await res.json().catch(() => ({ message: "Login failed" }));
       throw new Error(error.message || "Login failed");
     }
 
@@ -62,9 +62,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
     localStorage.setItem("auth_token", data.token);
     localStorage.setItem("auth_user", JSON.stringify(data.user));
-  };
+  }, []);
 
-  const register = async (email: string, password: string, name?: string) => {
+  const register = useCallback(async (email: string, password: string, name?: string) => {
     const res = await fetch(`${API}/api/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!res.ok) {
-      const error = await res.json();
+      const error = await res.json().catch(() => ({ message: "Registration failed" }));
       throw new Error(error.message || "Registration failed");
     }
 
@@ -81,16 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
     localStorage.setItem("auth_token", data.token);
     localStorage.setItem("auth_user", JSON.stringify(data.user));
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser(null);
     setToken(null);
     localStorage.removeItem("auth_token");
     localStorage.removeItem("auth_user");
-    // Force full page redirect to clear React state entirely
     window.location.href = "/login";
-  };
+  }, []);
 
   return (
     <AuthContext.Provider
@@ -117,22 +116,23 @@ export function useAuth() {
   return context;
 }
 
-// API fetch helper that automatically adds auth token
 export async function authFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
   const token = localStorage.getItem("auth_token");
 
-  const headers = {
-    ...options.headers,
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
   };
 
   if (token) {
-    (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
-  return fetch(url, {
+  const fullUrl = url.startsWith("http") ? url : `${API}${url}`;
+
+  return fetch(fullUrl, {
     ...options,
     headers,
   });

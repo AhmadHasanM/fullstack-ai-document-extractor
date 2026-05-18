@@ -15,14 +15,12 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql://admin:admin123@localhost:5432/pdf_extractor"
+        "DATABASE_URL"
     )
 
     # RabbitMQ
     RABBITMQ_URL: str = os.getenv(
-        "RABBITMQ_URL",
-        "amqp://guest:guest@localhost:5672/"
+        "RABBITMQ_URL"
     )
 
     QUEUE_NAME: str = "pdf_processing_queue"
@@ -50,6 +48,16 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = 100 * 1024 * 1024
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
+
+    # Embedding settings
+    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "auto")
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "models/text-embedding-004")
+    EMBEDDING_DIMENSION: int = 768
+
+    # Retrieval settings
+    TOP_K_RESULTS: int = 5
+    MIN_SIMILARITY: float = 0.5
+    MAX_CONTEXT_CHARS: int = 10000
 
 
 settings = Settings()

@@ -29,33 +29,40 @@ func NewChatHandler(
 	}
 }
 
-// CreateChatSession creates a new chat session
 func (h *ChatHandler) CreateChatSession(c *gin.Context) {
-	var req models.CreateChatSessionRequest
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "bad_request",
-			Message: err.Error(),
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Not authenticated",
 		})
 		return
 	}
 
-	// Generate title from first message if not provided
+	var req models.CreateChatSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid request",
+		})
+		return
+	}
+
 	if req.Title == "" {
 		req.Title = "New Chat"
 	}
 
 	session := &models.ChatSession{
 		ID:         uuid.New().String(),
+		UserID:     userID,
 		DocumentID: req.DocumentID,
 		Title:      req.Title,
 	}
 
 	if err := h.db.CreateChatSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: err.Error(),
+			Error:   "server_error",
+			Message: "Failed to create session",
 		})
 		return
 	}
@@ -67,15 +74,27 @@ func (h *ChatHandler) CreateChatSession(c *gin.Context) {
 	})
 }
 
-// ListChatSessions returns all chat sessions
 func (h *ChatHandler) ListChatSessions(c *gin.Context) {
-	sessions, err := h.db.ListChatSessions(50, 0)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: err.Error(),
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Not authenticated",
 		})
 		return
+	}
+
+	sessions, err := h.db.ListChatSessions(userID, 50, 0)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "server_error",
+			Message: "Failed to fetch sessions",
+		})
+		return
+	}
+
+	if sessions == nil {
+		sessions = []models.ChatSession{}
 	}
 
 	c.JSON(http.StatusOK, models.ListChatSessionsResponse{
@@ -83,11 +102,11 @@ func (h *ChatHandler) ListChatSessions(c *gin.Context) {
 	})
 }
 
-// GetChatSession returns a specific chat session
 func (h *ChatHandler) GetChatSession(c *gin.Context) {
+	userID := c.GetString("user_id")
 	sessionID := c.Param("id")
 
-	session, err := h.db.GetChatSession(sessionID)
+	session, err := h.db.GetChatSession(sessionID, userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -99,62 +118,79 @@ func (h *ChatHandler) GetChatSession(c *gin.Context) {
 	c.JSON(http.StatusOK, session)
 }
 
-// DeleteChatSession deletes a chat session
 func (h *ChatHandler) DeleteChatSession(c *gin.Context) {
+	userID := c.GetString("user_id")
 	sessionID := c.Param("id")
 
-	if err := h.db.DeleteChatSession(sessionID); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: err.Error(),
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "bad_request",
+			Message: "Session ID required",
 		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Chat session deleted"})
+	if err := h.db.DeleteChatSession(sessionID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "server_error",
+			Message: "Failed to delete session",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse{
+		Message: "Chat session deleted",
+	})
 }
 
-// Chat sends a message and gets AI response
 func (h *ChatHandler) Chat(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Not authenticated",
+		})
+		return
+	}
+
 	documentID := c.Param("id")
 
 	var req models.ChatRequest
-
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "bad_request",
-			Message: err.Error(),
+			Message: "Invalid request",
 		})
 		return
 	}
 
-	// Save user message
+	safeMessage := sanitizeMessage(req.Message)
+
 	userMessage := &models.ChatMessage{
 		ID:         uuid.New().String(),
+		UserID:     userID,
 		DocumentID: documentID,
 		SessionID:  req.SessionID,
 		Role:       "user",
-		Message:    req.Message,
+		Message:    safeMessage,
 	}
 
 	if err := h.db.SaveChatMessage(userMessage); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: "Failed to save user message: " + err.Error(),
+			Error:   "server_error",
+			Message: "Failed to save message",
 		})
 		return
 	}
 
-	// Call AI service for RAG response
-	aiResponse, err := h.callAIService(documentID, req.SessionID, req.Message)
+	aiResponse, err := h.callAIService(documentID, req.SessionID, safeMessage)
 	if err != nil {
-		// Fallback response if AI service fails
 		aiResponse = "I apologize, but I'm having trouble processing your request right now. Please try again later."
 	}
 
-	// Save AI response
 	assistantMessage := &models.ChatMessage{
 		ID:         uuid.New().String(),
+		UserID:     userID,
 		DocumentID: documentID,
 		SessionID:  req.SessionID,
 		Role:       "assistant",
@@ -163,8 +199,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 
 	if err := h.db.SaveChatMessage(assistantMessage); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: "Failed to save assistant message: " + err.Error(),
+			Error:   "server_error",
+			Message: "Failed to save response",
 		})
 		return
 	}
@@ -176,22 +212,28 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	})
 }
 
-// ChatWithSession sends a message to a specific chat session (no document ID in path)
 func (h *ChatHandler) ChatWithSession(c *gin.Context) {
-	sessionID := c.Param("sessionId")
-
-	var req models.ChatRequest
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "bad_request",
-			Message: err.Error(),
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Not authenticated",
 		})
 		return
 	}
 
-	// Get session to find document ID
-	session, err := h.db.GetChatSession(sessionID)
+	sessionID := c.Param("sessionId")
+
+	var req models.ChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid request",
+		})
+		return
+	}
+
+	session, err := h.db.GetChatSession(sessionID, userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
@@ -200,38 +242,38 @@ func (h *ChatHandler) ChatWithSession(c *gin.Context) {
 		return
 	}
 
-	// Use document_id from request if provided, otherwise use session's document_id
 	documentID := req.DocumentID
 	if documentID == "" && session.DocumentID != nil {
 		documentID = *session.DocumentID
 	}
 
-	// Save user message
+	safeMessage := sanitizeMessage(req.Message)
+
 	userMessage := &models.ChatMessage{
 		ID:         uuid.New().String(),
+		UserID:     userID,
 		DocumentID: documentID,
 		SessionID:  sessionID,
 		Role:       "user",
-		Message:    req.Message,
+		Message:    safeMessage,
 	}
 
 	if err := h.db.SaveChatMessage(userMessage); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: "Failed to save user message: " + err.Error(),
+			Error:   "server_error",
+			Message: "Failed to save message",
 		})
 		return
 	}
 
-	// Call AI service for RAG response
-	aiResponse, err := h.callAIService(documentID, sessionID, req.Message)
+	aiResponse, err := h.callAIService(documentID, sessionID, safeMessage)
 	if err != nil {
 		aiResponse = "I apologize, but I'm having trouble processing your request right now. Please try again later."
 	}
 
-	// Save AI response
 	assistantMessage := &models.ChatMessage{
 		ID:         uuid.New().String(),
+		UserID:     userID,
 		DocumentID: documentID,
 		SessionID:  sessionID,
 		Role:       "assistant",
@@ -240,8 +282,8 @@ func (h *ChatHandler) ChatWithSession(c *gin.Context) {
 
 	if err := h.db.SaveChatMessage(assistantMessage); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: "Failed to save assistant message: " + err.Error(),
+			Error:   "server_error",
+			Message: "Failed to save response",
 		})
 		return
 	}
@@ -253,18 +295,22 @@ func (h *ChatHandler) ChatWithSession(c *gin.Context) {
 	})
 }
 
-// GetHistory returns chat history for a document or session
 func (h *ChatHandler) GetHistory(c *gin.Context) {
+	userID := c.GetString("user_id")
 	documentID := c.Param("id")
 	sessionID := c.Query("session_id")
 
-	history, err := h.db.GetChatHistory(documentID, sessionID, 50)
+	history, err := h.db.GetChatHistory(documentID, sessionID, userID, 50)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: err.Error(),
+			Error:   "server_error",
+			Message: "Failed to fetch history",
 		})
 		return
+	}
+
+	if history == nil {
+		history = []models.ChatMessage{}
 	}
 
 	c.JSON(http.StatusOK, models.ChatHistoryResponse{
@@ -273,17 +319,21 @@ func (h *ChatHandler) GetHistory(c *gin.Context) {
 	})
 }
 
-// GetSessionHistory returns chat history for a specific session
 func (h *ChatHandler) GetSessionHistory(c *gin.Context) {
+	userID := c.GetString("user_id")
 	sessionID := c.Param("sessionId")
 
-	history, err := h.db.GetChatHistory("", sessionID, 50)
+	history, err := h.db.GetChatHistory("", sessionID, userID, 50)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: err.Error(),
+			Error:   "server_error",
+			Message: "Failed to fetch history",
 		})
 		return
+	}
+
+	if history == nil {
+		history = []models.ChatMessage{}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -292,15 +342,12 @@ func (h *ChatHandler) GetSessionHistory(c *gin.Context) {
 	})
 }
 
-// callAIService calls the AI service for RAG response
 func (h *ChatHandler) callAIService(documentID, sessionID, message string) (string, error) {
-	// AI service URL from config
 	aiServiceURL := h.config.AIServiceURL
 	if aiServiceURL == "" {
 		aiServiceURL = "http://localhost:8000"
 	}
 
-	// Prepare request body
 	reqBody := map[string]string{
 		"document_id": documentID,
 		"session_id":  sessionID,
@@ -312,7 +359,6 @@ func (h *ChatHandler) callAIService(documentID, sessionID, message string) (stri
 		return "", err
 	}
 
-	// Make request to AI service
 	resp, err := http.Post(
 		aiServiceURL+"/api/v1/chat",
 		"application/json",
@@ -324,10 +370,9 @@ func (h *ChatHandler) callAIService(documentID, sessionID, message string) (stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", nil // Return empty to trigger fallback
+		return "", nil
 	}
 
-	// Parse response
 	var aiResp struct {
 		Response string `json:"response"`
 	}
@@ -337,4 +382,12 @@ func (h *ChatHandler) callAIService(documentID, sessionID, message string) (stri
 	}
 
 	return aiResp.Response, nil
+}
+
+func sanitizeMessage(msg string) string {
+	const maxLen = 10000
+	if len(msg) > maxLen {
+		msg = msg[:maxLen]
+	}
+	return msg
 }

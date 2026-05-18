@@ -19,7 +19,9 @@ func NewQueueHandler(db *database.Database) *QueueHandler {
 }
 
 func (h *QueueHandler) GetStatus(c *gin.Context) {
-	counts, err := h.db.GetDocumentStatusCounts()
+	userID := c.GetString("user_id")
+
+	counts, err := h.db.GetDocumentStatusCounts(userID)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"status":     "queue active",
@@ -47,7 +49,7 @@ func (h *QueueHandler) GetDocumentStatus(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "not_found",
-			Message: err.Error(),
+			Message: "Queue item not found",
 		})
 		return
 	}

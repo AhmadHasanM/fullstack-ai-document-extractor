@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { authFetch } from "@/lib/auth";
 
 const API = process.env.NEXT_PUBLIC_API_URL;
@@ -44,6 +44,13 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [deleting, setDeleting] = useState<Record<string, boolean>>({});
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const showToast = useCallback((message: string, type: "success" | "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -75,8 +82,66 @@ export default function HistoryPage() {
     failed: docs.filter((d) => d.status === "failed").length,
   };
 
+  const handleDelete = async (e: React.MouseEvent, documentId: string) => {
+    e.stopPropagation();
+
+    if (!window.confirm("Are you sure you want to delete this document?")) {
+      return;
+    }
+
+    setDeleting((prev) => ({ ...prev, [documentId]: true }));
+
+    try {
+      const res = await authFetch(`${API}/api/documents/${documentId}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Failed to delete document" }));
+        throw new Error(err.message || err.error || "Failed to delete document");
+      }
+
+      setDocs((prev) => prev.filter((d) => d.id !== documentId));
+      showToast("Document deleted successfully", "success");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to delete document";
+      showToast(message, "error");
+    } finally {
+      setDeleting((prev) => ({ ...prev, [documentId]: false }));
+    }
+  };
+
   return (
     <main>
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-2">
+          <div
+            className={`px-5 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 ${
+              toast.type === "success"
+                ? "bg-emerald-600 text-white"
+                : "bg-red-500 text-white"
+            }`}
+          >
+            {toast.type === "success" ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
+            {toast.message}
+            <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <section className="max-w-7xl mx-auto px-8 pt-10 pb-6">
         <div className="flex items-center gap-2 text-sm text-black/40 mb-3">
@@ -180,16 +245,20 @@ export default function HistoryPage() {
                   <th className="px-4 py-3 text-caption text-black/50 font-medium">Size</th>
                   <th className="px-4 py-3 text-caption text-black/50 font-medium">Status</th>
                   <th className="px-4 py-3 text-caption text-black/50 font-medium">Processed</th>
+                  <th className="px-4 py-3 text-caption text-black/50 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((doc) => {
                   const status = STATUS_CONFIG[doc.status || "pending"];
+                  const isDeleting = deleting[doc.id] ?? false;
                   return (
                     <tr
                       key={doc.id}
-                      onClick={() => router.push(`/file/${doc.id}`)}
-                      className="border-t border-hairline hover:bg-surface-soft/50 transition-colors cursor-pointer"
+                      onClick={() => !isDeleting && router.push(`/file/${doc.id}`)}
+                      className={`border-t border-hairline hover:bg-surface-soft/50 transition-colors ${
+                        isDeleting ? "opacity-50 pointer-events-none" : "cursor-pointer"
+                      }`}
                     >
                       <td className="px-4 py-3">
                         <p className="text-body-sm font-medium text-black">
@@ -208,6 +277,27 @@ export default function HistoryPage() {
                       </td>
                       <td className="px-4 py-3 text-body-sm text-black/60">
                         {formatDate(doc.processed_at)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={(e) => handleDelete(e, doc.id)}
+                          disabled={isDeleting}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {isDeleting ? (
+                            <>
+                              <span className="w-3.5 h-3.5 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                              Deleting...
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              Delete
+                            </>
+                          )}
+                        </button>
                       </td>
                     </tr>
                   );

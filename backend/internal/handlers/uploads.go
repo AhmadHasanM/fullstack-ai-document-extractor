@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
 	"github.com/ahmadhasanm/ai-document-extractor/internal/config"
 	"github.com/ahmadhasanm/ai-document-extractor/internal/database"
 	"github.com/ahmadhasanm/ai-document-extractor/internal/models"
@@ -16,15 +18,14 @@ import (
 )
 
 type UploadHandler struct {
-	db       *database.Database
-	queue    *queue.RabbitMQ
-	config   *config.Config
+	db     *database.Database
+	queue  *queue.RabbitMQ
+	config *config.Config
 }
 
 func NewUploadHandler(db *database.Database, q *queue.RabbitMQ, cfg *config.Config) *UploadHandler {
-	// Ensure uploads directory exists
 	os.MkdirAll(cfg.UploadsDir, 0755)
-	
+
 	return &UploadHandler{
 		db:     db,
 		queue:  q,
@@ -33,7 +34,15 @@ func NewUploadHandler(db *database.Database, q *queue.RabbitMQ, cfg *config.Conf
 }
 
 func (h *UploadHandler) Upload(c *gin.Context) {
-	// Parse multipart form
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Not authenticated",
+		})
+		return
+	}
+
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -44,8 +53,8 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// Validate file type
-	if filepath.Ext(header.Filename) != ".pdf" {
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext != ".pdf" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "invalid_file_type",
 			Message: "Only PDF files are allowed",
@@ -53,7 +62,25 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	// Validate file size
+	buffer := make([]byte, 512)
+	if _, err := file.Read(buffer); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "bad_request",
+			Message: "Failed to read file",
+		})
+		return
+	}
+	file.Seek(0, io.SeekStart)
+
+	contentType := http.DetectContentType(buffer)
+	if contentType != "application/pdf" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "invalid_file_type",
+			Message: "File is not a valid PDF",
+		})
+		return
+	}
+
 	if header.Size > h.config.MaxFileSize {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "file_too_large",
@@ -62,16 +89,14 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	// Generate unique ID and filename
 	documentID := uuid.New().String()
 	filename := fmt.Sprintf("%s.pdf", documentID)
 	filePath := filepath.Join(h.config.UploadsDir, filename)
 
-	// Save file to disk
 	dst, err := os.Create(filePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "internal_error",
+			Error:   "server_error",
 			Message: "Failed to save file",
 		})
 		return
@@ -79,16 +104,17 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, file); err != nil {
+		os.Remove(filePath)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "internal_error",
+			Error:   "server_error",
 			Message: "Failed to save file",
 		})
 		return
 	}
 
-	// Create document record
 	doc := &models.Document{
 		ID:               documentID,
+		UserID:           userID,
 		Filename:         filename,
 		OriginalFilename: header.Filename,
 		FilePath:         filePath,
@@ -97,16 +123,14 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 	}
 
 	if err := h.db.CreateDocument(doc); err != nil {
-		// Cleanup file
 		os.Remove(filePath)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
+			Error:   "server_error",
 			Message: "Failed to create document record",
 		})
 		return
 	}
 
-	// Create queue item
 	queueItem := &models.ProcessingQueue{
 		ID:         uuid.New().String(),
 		DocumentID: documentID,
@@ -116,13 +140,12 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 
 	if err := h.db.CreateQueueItem(queueItem); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "database_error",
-			Message: "Failed to create queue item",
+			Error:   "server_error",
+			Message: "Failed to queue document",
 		})
 		return
 	}
 
-	// Publish to RabbitMQ
 	queueMsg := &models.QueueMessage{
 		DocumentID: documentID,
 		PDFPath:    filePath,
@@ -131,13 +154,12 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 
 	if err := h.queue.PublishMessage(queueMsg); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "queue_error",
+			Error:   "server_error",
 			Message: "Failed to queue document for processing",
 		})
 		return
 	}
 
-	// Return success response
 	c.JSON(http.StatusOK, models.UploadResponse{
 		DocumentID: documentID,
 		Message:    "Document uploaded successfully and queued for processing",

@@ -56,10 +56,8 @@ export default function DashboardPage() {
 
   async function loadData() {
     try {
-      const token = localStorage.getItem("auth_token");
-      const res = await fetch(`${API}/api/documents`, {
+      const res = await authFetch(`${API}/api/documents`, {
         cache: "no-store",
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       const data = await res.json();
       const list = Array.isArray(data)
@@ -78,11 +76,9 @@ export default function DashboardPage() {
       setUploading(true);
       const form = new FormData();
       form.append("file", file);
-      const token = localStorage.getItem("auth_token");
-      await fetch(`${API}/api/upload`, {
+      await authFetch(`${API}/api/upload`, {
         method: "POST",
         body: form,
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       await loadData();
     } catch (e) {

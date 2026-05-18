@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -19,11 +20,20 @@ func main() {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	// Initialize configuration
-	cfg := config.NewConfig()
+	// Initialize configuration (validates required env vars)
+	cfg, err := config.NewConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	// Set Gin mode
+	if cfg.IsProduction {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
 	log.Println("UploadsDir:", cfg.UploadsDir)
 	log.Println("OutputsDir:", cfg.OutputsDir)
+	log.Println("Production mode:", cfg.IsProduction)
 
 	// Initialize database
 	db, err := database.NewDatabase(cfg.DatabaseURL)
@@ -43,8 +53,9 @@ func main() {
 	router := gin.Default()
 
 	// Apply middleware
-	router.Use(middleware.CORSMiddleware())
+	router.Use(middleware.CORSMiddleware(cfg.CORSAllowedOrigins))
 	router.Use(middleware.LoggerMiddleware())
+	router.Use(middleware.SecurityHeadersMiddleware(cfg.IsProduction))
 
 	// Initialize handlers
 	documentHandler := handlers.NewDocumentHandler(db, rabbitMQ, cfg)
@@ -53,7 +64,12 @@ func main() {
 	chatHandler := handlers.NewChatHandler(db, cfg)
 	authHandler := handlers.NewAuthHandler(db, cfg)
 
-	// Health check
+	// Rate limiters
+	authRateLimiter := middleware.NewRateLimiter(10, time.Minute)
+	chatRateLimiter := middleware.NewRateLimiter(30, time.Minute)
+	uploadRateLimiter := middleware.NewRateLimiter(10, time.Minute)
+
+	// Health check (public)
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status":  "healthy",
@@ -64,17 +80,17 @@ func main() {
 	// API routes
 	api := router.Group("/api")
 	{
-		// Auth endpoints (public)
-		api.POST("/auth/register", authHandler.Register)
-		api.POST("/auth/login", authHandler.Login)
+		// Auth endpoints (public with rate limiting)
+		api.POST("/auth/register", authRateLimiter.Limit(), authHandler.Register)
+		api.POST("/auth/login", authRateLimiter.Limit(), authHandler.Login)
 		api.GET("/auth/me", middleware.AuthMiddleware(cfg), authHandler.Me)
 
 		// Protected routes - require authentication
 		protected := api.Group("")
 		protected.Use(middleware.AuthMiddleware(cfg))
 		{
-			// Upload endpoints
-			protected.POST("/upload", uploadHandler.Upload)
+			// Upload endpoints (rate limited)
+			protected.POST("/upload", uploadRateLimiter.Limit(), uploadHandler.Upload)
 
 			// Document endpoints
 			protected.GET("/documents", documentHandler.List)
@@ -88,29 +104,17 @@ func main() {
 			protected.GET("/queue/status", queueHandler.GetStatus)
 			protected.GET("/queue/documents/:id", queueHandler.GetDocumentStatus)
 
-			// Chat endpoints
-			// Sessions (no document required)
-			protected.POST("/chat/sessions", chatHandler.CreateChatSession)
+			// Chat endpoints with rate limiting
+			protected.POST("/chat/sessions", chatRateLimiter.Limit(), chatHandler.CreateChatSession)
 			protected.GET("/chat/sessions", chatHandler.ListChatSessions)
 			protected.GET("/chat/sessions/:sessionId", chatHandler.GetChatSession)
 			protected.DELETE("/chat/sessions/:sessionId", chatHandler.DeleteChatSession)
 			protected.GET("/chat/sessions/:sessionId/history", chatHandler.GetSessionHistory)
-
-			// Chat with document
-			protected.POST("/documents/:id/chat", chatHandler.Chat)
+			protected.POST("/documents/:id/chat", chatRateLimiter.Limit(), chatHandler.Chat)
 			protected.GET("/documents/:id/chat/history", chatHandler.GetHistory)
-
-			// Chat with session (no document in path)
-			protected.POST("/chat/sessions/:sessionId/messages", chatHandler.ChatWithSession)
+			protected.POST("/chat/sessions/:sessionId/messages", chatRateLimiter.Limit(), chatHandler.ChatWithSession)
 		}
 	}
-
-	// Serve static files (outputs)
-	//router.Static("/outputs", "./outputs")
-	//router.Static("/uploads", "./uploads")
-	router.Static("/uploads", cfg.UploadsDir)
-	router.Static("/outputs", cfg.OutputsDir)
-
 
 	// Start server
 	port := os.Getenv("PORT")
@@ -118,7 +122,7 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("🚀 Server starting on port %s", port)
+	log.Printf("Server starting on port %s", port)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
