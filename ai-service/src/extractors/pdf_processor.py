@@ -9,6 +9,7 @@ from .table_extractor import TableExtractor
 from .image_extractor import ImageExtractor
 from .ocr_processor import OCRProcessor
 from ..services.markdown_formatter import MarkdownFormatter
+from ..database.db import Database
 from ..config import settings
 
 class PDFProcessor:
@@ -96,6 +97,16 @@ class PDFProcessor:
         chunks = await self._chunk_document(
             markdown_content
         )
+
+        # Save chunks to database
+        if chunks:
+            print(f"💾 Saving {len(chunks)} chunks to database...")
+            db = Database()
+            await db.connect()
+            await db.save_chunks(chunks)
+            print(f"✅ Chunks saved successfully")
+        else:
+            print("⚠️ No chunks to save")
 
         # Di paling bawah sebelum return
 

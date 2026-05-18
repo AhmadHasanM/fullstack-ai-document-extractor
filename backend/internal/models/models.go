@@ -2,6 +2,31 @@ package models
 
 import "time"
 
+type User struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"-"`
+	Name         *string   `json:"name,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type RegisterRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,min=6"`
+	Name     string `json:"name"`
+}
+
+type LoginRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+}
+
+type AuthResponse struct {
+	Token string `json:"token"`
+	User  User   `json:"user"`
+}
+
 type Document struct {
 	ID               string     `json:"id"`
 	Filename         string     `json:"filename"`
@@ -49,6 +74,14 @@ type ProcessingQueue struct {
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 }
 
+type ChatSession struct {
+	ID         string    `json:"id"`
+	DocumentID *string   `json:"document_id,omitempty"`
+	Title      string    `json:"title"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 type ChatMessage struct {
 	ID         string    `json:"id"`
 	DocumentID string    `json:"document_id"`
@@ -68,7 +101,23 @@ type UploadResponse struct {
 	Status     string `json:"status"`
 }
 
+type CreateChatSessionRequest struct {
+	DocumentID *string `json:"document_id,omitempty"`
+	Title      string  `json:"title" binding:"required"`
+}
+
+type CreateChatSessionResponse struct {
+	SessionID string    `json:"session_id"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ListChatSessionsResponse struct {
+	Sessions []ChatSession `json:"sessions"`
+}
+
 type ChatRequest struct {
+	DocumentID string `json:"document_id,omitempty"`
 	Message   string `json:"message" binding:"required"`
 	SessionID string `json:"session_id" binding:"required"`
 }
@@ -77,6 +126,11 @@ type ChatResponse struct {
 	Response  string    `json:"response"`
 	SessionID string    `json:"session_id"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+type ChatHistoryResponse struct {
+	SessionID string         `json:"session_id"`
+	Messages   []ChatMessage `json:"messages"`
 }
 
 type QueueMessage struct {

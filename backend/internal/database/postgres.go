@@ -3,7 +3,6 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/ahmadhasanm/ai-document-extractor/internal/models"
@@ -27,9 +26,29 @@ func NewDatabase(connectionString string) (*Database, error) {
 	// Set connection pool settings
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	database := &Database{conn: db}
 
-	return &Database{conn: db}, nil
+	// Auto-create users table if it doesn't exist
+	if err := database.ensureUsersTable(); err != nil {
+		fmt.Printf("Warning: failed to ensure users table: %v\n", err)
+	}
+
+	return database, nil
+}
+
+func (db *Database) ensureUsersTable() error {
+	query := `
+		CREATE TABLE IF NOT EXISTS users (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			email VARCHAR(255) UNIQUE NOT NULL,
+			password_hash VARCHAR(255) NOT NULL,
+			name VARCHAR(255),
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`
+	_, err := db.conn.Exec(query)
+	return err
 }
 
 func (db *Database) Close() error {
@@ -167,29 +186,53 @@ func (db *Database) GetQueueStatus(documentID string) (*models.ProcessingQueue, 
 
 // Chat operations
 func (db *Database) SaveChatMessage(msg *models.ChatMessage) error {
+	// Handle empty document_id as NULL (for chats without associated document)
+	var docID interface{}
+	if msg.DocumentID == "" {
+		docID = nil
+	} else {
+		docID = msg.DocumentID
+	}
+
 	query := `
 		INSERT INTO chat_history (id, document_id, session_id, role, message)
 		VALUES ($1, $2, $3, $4, $5)
 	`
-	_, err := db.conn.Exec(query, msg.ID, msg.DocumentID, msg.SessionID, msg.Role, msg.Message)
+	_, err := db.conn.Exec(query, msg.ID, docID, msg.SessionID, msg.Role, msg.Message)
 	return err
 }
 
 func (db *Database) GetChatHistory(documentID, sessionID string, limit int) ([]models.ChatMessage, error) {
-	query := `
-		SELECT id, document_id, session_id, role, message, created_at
-		FROM chat_history
-		WHERE document_id = $1 AND session_id = $2
-		ORDER BY created_at DESC
-		LIMIT $3
-	`
-	
-	rows, err := db.conn.Query(query, documentID, sessionID, limit)
+	// If sessionID is provided, use it; otherwise fall back to documentID
+	var query string
+	var rows *sql.Rows
+	var err error
+
+	if sessionID != "" {
+		query = `
+			SELECT id, document_id, session_id, role, message, created_at
+			FROM chat_history
+			WHERE session_id = $1
+			ORDER BY created_at ASC
+			LIMIT $2
+		`
+		rows, err = db.conn.Query(query, sessionID, limit)
+	} else {
+		query = `
+			SELECT id, document_id, session_id, role, message, created_at
+			FROM chat_history
+			WHERE document_id = $1
+			ORDER BY created_at ASC
+			LIMIT $2
+		`
+		rows, err = db.conn.Query(query, documentID, limit)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var messages []models.ChatMessage
 	for rows.Next() {
 		var msg models.ChatMessage
@@ -197,9 +240,9 @@ func (db *Database) GetChatHistory(documentID, sessionID string, limit int) ([]m
 		if err != nil {
 			return nil, err
 		}
-		messages = append([]models.ChatMessage{msg}, messages...) // Reverse order
+		messages = append(messages, msg)
 	}
-	
+
 	return messages, nil
 }
 
@@ -234,6 +277,92 @@ func (db *Database) GetDocumentChunks(documentID string) ([]models.DocumentChunk
 	return chunks, nil
 }
 
+// Chat session operations
+func (db *Database) CreateChatSession(session *models.ChatSession) error {
+	// Handle nil/empty document_id as NULL
+	var docID interface{}
+	if session.DocumentID != nil && *session.DocumentID != "" {
+		docID = *session.DocumentID
+	} else {
+		docID = nil
+	}
+
+	query := `
+		INSERT INTO chat_sessions (id, document_id, title)
+		VALUES ($1, $2, $3)
+	`
+	_, err := db.conn.Exec(query, session.ID, docID, session.Title)
+	return err
+}
+
+func (db *Database) GetChatSession(id string) (*models.ChatSession, error) {
+	query := `
+		SELECT id, document_id, title, created_at, updated_at
+		FROM chat_sessions
+		WHERE id = $1
+	`
+
+	session := &models.ChatSession{}
+	var docID *string
+	err := db.conn.QueryRow(query, id).Scan(
+		&session.ID, &docID, &session.Title, &session.CreatedAt, &session.UpdatedAt,
+	)
+	session.DocumentID = docID
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("chat session not found")
+	}
+
+	return session, err
+}
+
+func (db *Database) ListChatSessions(limit, offset int) ([]models.ChatSession, error) {
+	query := `
+		SELECT id, document_id, title, created_at, updated_at
+		FROM chat_sessions
+		ORDER BY updated_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	rows, err := db.conn.Query(query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []models.ChatSession
+	for rows.Next() {
+		var session models.ChatSession
+		var docID *string
+		err := rows.Scan(
+			&session.ID, &docID, &session.Title, &session.CreatedAt, &session.UpdatedAt,
+		)
+		session.DocumentID = docID
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+
+	return sessions, nil
+}
+
+func (db *Database) UpdateChatSession(id, title string) error {
+	query := `
+		UPDATE chat_sessions
+		SET title = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+	_, err := db.conn.Exec(query, title, id)
+	return err
+}
+
+func (db *Database) DeleteChatSession(id string) error {
+	query := `DELETE FROM chat_sessions WHERE id = $1`
+	_, err := db.conn.Exec(query, id)
+	return err
+}
+
 // GetDocumentStatusCounts returns count of documents grouped by status.
 // Tambahkan method ini ke file database.go yang sudah ada.
 func (db *Database) GetDocumentStatusCounts() (map[string]int, error) {
@@ -266,4 +395,52 @@ func (db *Database) GetDocumentStatusCounts() (map[string]int, error) {
 	}
 
 	return counts, rows.Err()
+}
+
+// User operations
+func (db *Database) CreateUser(user *models.User) error {
+	query := `
+		INSERT INTO users (id, email, password_hash, name)
+		VALUES ($1, $2, $3, $4)
+	`
+	_, err := db.conn.Exec(query, user.ID, user.Email, user.PasswordHash, user.Name)
+	return err
+}
+
+func (db *Database) GetUserByEmail(email string) (*models.User, error) {
+	query := `
+		SELECT id, email, password_hash, name, created_at, updated_at
+		FROM users
+		WHERE email = $1
+	`
+
+	user := &models.User{}
+	err := db.conn.QueryRow(query, email).Scan(
+		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.CreatedAt, &user.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	return user, err
+}
+
+func (db *Database) GetUserByID(id string) (*models.User, error) {
+	query := `
+		SELECT id, email, password_hash, name, created_at, updated_at
+		FROM users
+		WHERE id = $1
+	`
+
+	user := &models.User{}
+	err := db.conn.QueryRow(query, id).Scan(
+		&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.CreatedAt, &user.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	return user, err
 }

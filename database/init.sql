@@ -66,11 +66,20 @@ CREATE TABLE IF NOT EXISTS extracted_elements (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Chat sessions table
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    document_id UUID REFERENCES documents(id) ON DELETE SET NULL,
+    title VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Chat history table
 CREATE TABLE IF NOT EXISTS chat_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
-    session_id UUID NOT NULL,
+    session_id UUID REFERENCES chat_sessions(id) ON DELETE CASCADE,
     role VARCHAR(20) CHECK (role IN ('user', 'assistant')),
     message TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -85,6 +94,8 @@ CREATE INDEX idx_processing_queue_status ON processing_queue(status);
 CREATE INDEX idx_processing_queue_priority ON processing_queue(priority DESC);
 CREATE INDEX idx_extracted_elements_document_id ON extracted_elements(document_id);
 CREATE INDEX idx_extracted_elements_type ON extracted_elements(element_type);
+CREATE INDEX idx_chat_sessions_document_id ON chat_sessions(document_id);
+CREATE INDEX idx_chat_sessions_updated_at ON chat_sessions(updated_at DESC);
 CREATE INDEX idx_chat_history_document_id ON chat_history(document_id);
 CREATE INDEX idx_chat_history_session_id ON chat_history(session_id);
 
@@ -98,4 +109,21 @@ END;
 $$ language 'plpgsql';
 
 CREATE TRIGGER update_documents_updated_at BEFORE UPDATE ON documents
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Users table for JWT authentication
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for user lookups
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- Create updated_at trigger for users
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

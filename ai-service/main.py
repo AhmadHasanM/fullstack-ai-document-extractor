@@ -1,5 +1,6 @@
 import asyncio
 import threading
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,10 +9,18 @@ import uvicorn
 from src.api.routes import router
 from src.services.queue_consumer import QueueConsumer
 from src.config import settings
+from src.database.db import Database
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 queue_consumer = None
 consumer_thread = None
 stop_event = threading.Event()
+db = None
 
 
 def run_consumer():
@@ -25,7 +34,7 @@ def run_consumer():
         queue_consumer.connect()
 
         # blocking loop
-        queue_consumer.start_consuming()
+        queue_consumer.start()
 
     except Exception as e:
         print(f"❌ Consumer thread error: {e}")
@@ -33,12 +42,18 @@ def run_consumer():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global consumer_thread, queue_consumer
+    global consumer_thread, queue_consumer, db
 
     print("🚀 Starting AI Service...")
     print(f"📁 Outputs directory: {settings.OUTPUTS_DIR}")
     print(f"🔗 RabbitMQ URL: {settings.RABBITMQ_URL}")
     print(f"📬 Queue Name: {settings.QUEUE_NAME}")
+
+    # Initialize and connect database (creates tables if not exist)
+    print("📊 Connecting to database...")
+    db = Database()
+    await db.connect()
+    print("✅ Database connected and tables ready")
 
     # Start consumer thread
     consumer_thread = threading.Thread(
@@ -62,11 +77,16 @@ async def lifespan(app: FastAPI):
     print("🛑 Shutting down AI Service...")
 
     try:
-        if queue_consumer:
-            queue_consumer.stop_consuming()
+        if db:
+            await db.close()
+            print("✅ Database connection closed")
 
         if queue_consumer:
-            asyncio.run(queue_consumer.stop())
+            if hasattr(queue_consumer, "stop"):
+                queue_consumer.stop()
+            else:
+                if queue_consumer.connection:
+                    queue_consumer.connection.close()
 
     except Exception as e:
         print(f"⚠️ Shutdown error: {e}")

@@ -51,6 +51,7 @@ func main() {
 	uploadHandler := handlers.NewUploadHandler(db, rabbitMQ, cfg)
 	queueHandler := handlers.NewQueueHandler(db)
 	chatHandler := handlers.NewChatHandler(db, cfg)
+	authHandler := handlers.NewAuthHandler(db, cfg)
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
@@ -63,24 +64,45 @@ func main() {
 	// API routes
 	api := router.Group("/api")
 	{
-		// Upload endpoints
-		api.POST("/upload", uploadHandler.Upload)
+		// Auth endpoints (public)
+		api.POST("/auth/register", authHandler.Register)
+		api.POST("/auth/login", authHandler.Login)
+		api.GET("/auth/me", middleware.AuthMiddleware(cfg), authHandler.Me)
 
-		// Document endpoints
-		api.GET("/documents", documentHandler.List)
-		api.GET("/documents/:id", documentHandler.Get)
-		api.GET("/documents/:id/markdown", documentHandler.GetMarkdown)
-		api.GET("/documents/:id/json", documentHandler.GetJSON)
-		api.GET("/documents/:id/images", documentHandler.GetImages)
-		api.DELETE("/documents/:id", documentHandler.Delete)
+		// Protected routes - require authentication
+		protected := api.Group("")
+		protected.Use(middleware.AuthMiddleware(cfg))
+		{
+			// Upload endpoints
+			protected.POST("/upload", uploadHandler.Upload)
 
-		// Queue endpoints
-		api.GET("/queue/status", queueHandler.GetStatus)
-		api.GET("/queue/documents/:id", queueHandler.GetDocumentStatus)
+			// Document endpoints
+			protected.GET("/documents", documentHandler.List)
+			protected.GET("/documents/:id", documentHandler.Get)
+			protected.GET("/documents/:id/markdown", documentHandler.GetMarkdown)
+			protected.GET("/documents/:id/json", documentHandler.GetJSON)
+			protected.GET("/documents/:id/images", documentHandler.GetImages)
+			protected.DELETE("/documents/:id", documentHandler.Delete)
 
-		// Chat endpoints
-		api.POST("/documents/:id/chat", chatHandler.Chat)
-		api.GET("/documents/:id/chat/history", chatHandler.GetHistory)
+			// Queue endpoints
+			protected.GET("/queue/status", queueHandler.GetStatus)
+			protected.GET("/queue/documents/:id", queueHandler.GetDocumentStatus)
+
+			// Chat endpoints
+			// Sessions (no document required)
+			protected.POST("/chat/sessions", chatHandler.CreateChatSession)
+			protected.GET("/chat/sessions", chatHandler.ListChatSessions)
+			protected.GET("/chat/sessions/:sessionId", chatHandler.GetChatSession)
+			protected.DELETE("/chat/sessions/:sessionId", chatHandler.DeleteChatSession)
+			protected.GET("/chat/sessions/:sessionId/history", chatHandler.GetSessionHistory)
+
+			// Chat with document
+			protected.POST("/documents/:id/chat", chatHandler.Chat)
+			protected.GET("/documents/:id/chat/history", chatHandler.GetHistory)
+
+			// Chat with session (no document in path)
+			protected.POST("/chat/sessions/:sessionId/messages", chatHandler.ChatWithSession)
+		}
 	}
 
 	// Serve static files (outputs)

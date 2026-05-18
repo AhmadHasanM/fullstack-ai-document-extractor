@@ -13,6 +13,7 @@ type Config struct {
 	UploadsDir   string
 	OutputsDir   string
 	MaxFileSize  int64
+	JWTSecret    string
 }
 
 func NewConfig() *Config {
@@ -47,6 +48,11 @@ func NewConfig() *Config {
 		),
 
 		MaxFileSize: 100 * 1024 * 1024,
+
+		JWTSecret: getEnv(
+			"JWT_SECRET",
+			"your-super-secret-jwt-key-change-in-production",
+		),
 	}
 }
 
