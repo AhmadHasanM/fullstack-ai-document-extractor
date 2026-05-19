@@ -63,13 +63,19 @@ services:
   ai_service:
     build:
       context: ./ai-service
+      dockerfile: Dockerfile
     container_name: ai_service
     restart: always
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:?error}@ai_postgres:5432/pdf_extractor
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:?error}@ai_rabbitmq:5672/
-      GEMINI_API_KEY: ${GEMINI_API_KEY:?error}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       PYTHONUNBUFFERED: 1
+      # DeepSeek OCR2 — Local OCR Configuration
+      OCR_PROVIDER: deepseek_ocr2
+      OCR_DEVICE: cuda
+      OCR_BATCH_SIZE: 4
+      OCR_USE_GPU: "true"
     ports:
       - "8000:8000"
     depends_on:
@@ -80,6 +86,14 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
+    # GPU support (CUDA)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   ai_frontend:
     build:

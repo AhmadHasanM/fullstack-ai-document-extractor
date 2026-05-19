@@ -14,20 +14,25 @@ class Settings(BaseSettings):
     )
 
     # Database
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL"
-    )
+    DATABASE_URL: str = os.getenv("DATABASE_URL")
 
     # RabbitMQ
-    RABBITMQ_URL: str = os.getenv(
-        "RABBITMQ_URL"
-    )
-
+    RABBITMQ_URL: str = os.getenv("RABBITMQ_URL")
     QUEUE_NAME: str = "pdf_processing_queue"
 
-    # API Keys
+    # API Keys (optional — Gemini only for markdown formatting / QA)
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    DEEPSEK_API_KEY: str = os.getenv("DEEPSEK_API_KEY", "")
+    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+
+    # ================================================================ #
+    #  DeepSeek OCR2 — Local OCR Configuration                          #
+    # ================================================================ #
+    OCR_PROVIDER: str = os.getenv("OCR_PROVIDER", "deepseek_ocr2")
+    OCR_DEVICE: str = os.getenv("OCR_DEVICE", "cuda")
+    OCR_BATCH_SIZE: int = int(os.getenv("OCR_BATCH_SIZE", "4"))
+    OCR_USE_GPU: bool = os.getenv("OCR_USE_GPU", "true").lower() == "true"
+    OCR_LANGUAGES: str = os.getenv("OCR_LANGUAGES", "en")
+    OCR_PAGE_DPI: int = int(os.getenv("OCR_PAGE_DPI", "200"))
 
     # Detect running mode
     RUNNING_IN_DOCKER: bool = Path("/.dockerenv").exists()
@@ -50,8 +55,8 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 200
 
     # Embedding settings
-    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "auto")
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "models/text-embedding-004")
+    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "sentence-transformers")
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "all-mpnet-base-v2")
     EMBEDDING_DIMENSION: int = 768
 
     # Retrieval settings

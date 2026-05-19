@@ -4,7 +4,7 @@ from typing import Dict, List
 
 
 class MarkdownFormatter:
-    """Format extracted content into structured markdown using Gemini"""
+    """Format extracted content into structured markdown using Gemini or basic fallback."""
 
     def __init__(self, api_key: str):
         if api_key:
@@ -19,51 +19,25 @@ class MarkdownFormatter:
             return self._basic_format(extraction_result)
 
         try:
-            content_summary = self._prepare_content_summary(
-                extraction_result
-            )
+            content_summary = self._prepare_content_summary(extraction_result)
 
-            if not self._has_meaningful_content(
-                extraction_result,
-                content_summary
-            ):
-                return self._basic_format(
-                    extraction_result
-                )
+            if not self._has_meaningful_content(extraction_result, content_summary):
+                return self._basic_format(extraction_result)
 
             prompt = self._build_prompt(content_summary)
-
-            response = self.model.generate_content(
-                prompt
-            )
-
-            text = self._safe_response_text(
-                response
-            )
+            response = self.model.generate_content(prompt)
+            text = self._safe_response_text(response)
 
             if not text.strip():
-                return self._basic_format(
-                    extraction_result
-                )
+                return self._basic_format(extraction_result)
 
             return text.strip()
 
         except Exception as e:
-            print(
-                f"Error formatting with Gemini: {e}"
-            )
-            return self._basic_format(
-                extraction_result
-            )
+            print(f"Error formatting with Gemini: {e}")
+            return self._basic_format(extraction_result)
 
-    # ------------------------------------------------ #
-    # Gemini prompt                                    #
-    # ------------------------------------------------ #
-
-    def _build_prompt(
-        self,
-        content_summary: str
-    ) -> str:
+    def _build_prompt(self, content_summary: str) -> str:
         return f"""
 You are a document formatter.
 
@@ -90,42 +64,20 @@ SOURCE CONTENT:
 {content_summary}
 """
 
-    # ------------------------------------------------ #
-    # Validation                                       #
-    # ------------------------------------------------ #
-
-    def _has_meaningful_content(
-        self,
-        extraction_result: Dict,
-        content_summary: str
-    ) -> bool:
-
+    def _has_meaningful_content(self, extraction_result: Dict, content_summary: str) -> bool:
         page_texts = []
 
-        for page in extraction_result.get(
-            "pages",
-            []
-        ):
-            txt = page.get(
-                "raw_text",
-                ""
-            ).strip()
-
-            if txt:
-                page_texts.append(txt)
+        for page in extraction_result.get("pages", []):
+            txt = page.get("text", "") or page.get("raw_text", "")
+            if isinstance(txt, str) and txt.strip():
+                page_texts.append(txt.strip())
 
         merged = " ".join(page_texts).strip()
 
         if len(merged) >= 80:
             return True
 
-        alpha_count = len(
-            re.findall(
-                r"[A-Za-z0-9]",
-                merged
-            )
-        )
-
+        alpha_count = len(re.findall(r"[A-Za-z0-9]", merged))
         if alpha_count >= 40:
             return True
 
@@ -134,10 +86,7 @@ SOURCE CONTENT:
 
         return False
 
-    def _safe_response_text(
-        self,
-        response
-    ) -> str:
+    def _safe_response_text(self, response) -> str:
         try:
             if hasattr(response, "text"):
                 if response.text:
@@ -146,285 +95,109 @@ SOURCE CONTENT:
             pass
 
         try:
-            candidates = getattr(
-                response,
-                "candidates",
-                []
-            )
-
+            candidates = getattr(response, "candidates", [])
             for candidate in candidates:
-                content = getattr(
-                    candidate,
-                    "content",
-                    None
-                )
-
+                content = getattr(candidate, "content", None)
                 if not content:
                     continue
-
-                parts = getattr(
-                    content,
-                    "parts",
-                    []
-                )
-
+                parts = getattr(content, "parts", [])
                 texts = []
-
                 for part in parts:
-                    t = getattr(
-                        part,
-                        "text",
-                        ""
-                    )
-
+                    t = getattr(part, "text", "")
                     if t:
                         texts.append(t)
-
                 if texts:
                     return "\n".join(texts)
-
         except Exception:
             pass
 
         return ""
 
-    # ------------------------------------------------ #
-    # Content summary                                  #
-    # ------------------------------------------------ #
-
-    def _prepare_content_summary(
-        self,
-        extraction_result: Dict
-    ) -> str:
+    def _prepare_content_summary(self, extraction_result: Dict) -> str:
         parts = []
 
-        for page in extraction_result.get(
-            "pages",
-            []
-        ):
-            page_num = page.get(
-                "page_number",
-                "?"
-            )
+        for page in extraction_result.get("pages", []):
+            page_num = page.get("page_number", "?")
+            text = page.get("text", "") or page.get("raw_text", "")
+            if isinstance(text, str) and text.strip():
+                parts.append(f"\n--- Page {page_num} ---\n{text.strip()}")
 
-            text = page.get(
-                "raw_text",
-                ""
-            ).strip()
-
-            if text:
-                parts.append(
-                    f"\n--- Page {page_num} ---\n{text}"
-                )
-
-        tables = extraction_result.get(
-            "tables",
-            []
-        )
-
+        tables = extraction_result.get("tables", [])
         if tables:
-            parts.append(
-                "\n\n--- Tables ---"
-            )
-
+            parts.append("\n\n--- Tables ---")
             for table in tables:
-                page_num = table.get(
-                    "page_number",
-                    "?"
-                )
+                page_num = table.get("page_number", "?")
+                parts.append(f"\nTable (page {page_num}):")
+                parts.append(table.get("markdown", ""))
 
-                parts.append(
-                    f"\nTable (page {page_num}):"
-                )
-
-                parts.append(
-                    table.get(
-                        "markdown",
-                        ""
-                    )
-                )
-
-        images = extraction_result.get(
-            "images",
-            []
-        )
-
+        images = extraction_result.get("images", [])
         if images:
-            parts.append(
-                "\n\n--- Images ---"
-            )
-
+            parts.append("\n\n--- Images ---")
             for img in images:
-                parts.append(
-                    f"Image file: "
-                    f"{img['path']} | "
-                    f"page {img['page_number']}"
-                )
+                parts.append(f"Image file: {img['path']} | page {img['page_number']}")
 
         return "\n".join(parts)
 
-    # ------------------------------------------------ #
-    # Basic fallback                                   #
-    # ------------------------------------------------ #
-
-    def _basic_format(
-        self,
-        extraction_result: Dict
-    ) -> str:
+    def _basic_format(self, extraction_result: Dict) -> str:
         parts: List[str] = []
-
         parts.append("# Document\n")
 
-        pages = extraction_result.get(
-            "pages",
-            []
-        )
-
+        pages = extraction_result.get("pages", [])
         for page in pages:
-            page_num = page.get(
-                "page_number",
-                "?"
-            )
+            page_num = page.get("page_number", "?")
+            raw_text = page.get("text", "") or page.get("raw_text", "")
+            if isinstance(raw_text, str):
+                raw_text = raw_text.strip()
 
-            raw_text = page.get(
-                "raw_text",
-                ""
-            ).strip()
-
-            parts.append(
-                f"\n## Page {page_num}\n"
-            )
+            parts.append(f"\n## Page {page_num}\n")
 
             if raw_text:
-                parts.append(
-                    self._apply_basic_formula_heuristics(
-                        raw_text
-                    )
-                )
+                parts.append(self._apply_basic_formula_heuristics(raw_text))
             else:
-                parts.append(
-                    "_No readable text_"
-                )
+                parts.append("_No readable text_")
 
-        tables = extraction_result.get(
-            "tables",
-            []
-        )
-
+        tables = extraction_result.get("tables", [])
         if tables:
-            parts.append(
-                "\n\n## Tables\n"
-            )
-
+            parts.append("\n\n## Tables\n")
             for table in tables:
-                page_num = table.get(
-                    "page_number",
-                    "?"
-                )
+                page_num = table.get("page_number", "?")
+                idx = table.get("table_index", 0)
+                parts.append(f"\n### Table {idx + 1} (Page {page_num})\n")
+                parts.append(table.get("markdown", ""))
 
-                idx = table.get(
-                    "table_index",
-                    0
-                )
-
-                parts.append(
-                    f"\n### Table {idx + 1} "
-                    f"(Page {page_num})\n"
-                )
-
-                parts.append(
-                    table.get(
-                        "markdown",
-                        ""
-                    )
-                )
-
-        images = extraction_result.get(
-            "images",
-            []
-        )
-
+        images = extraction_result.get("images", [])
         if images:
-            parts.append(
-                "\n\n## Images\n"
-            )
-
+            parts.append("\n\n## Images\n")
             for img in images:
-                path = img.get(
-                    "path",
-                    ""
-                )
-
-                filename = img.get(
-                    "filename",
-                    "image"
-                )
-
-                page_num = img.get(
-                    "page_number",
-                    "?"
-                )
-
-                parts.append(
-                    f"![{filename}]"
-                    f"({path}) "
-                    f"(Page {page_num})"
-                )
+                path = img.get("path", "")
+                filename = img.get("filename", "image")
+                page_num = img.get("page_number", "?")
+                parts.append(f"![{filename}]({path}) (Page {page_num})")
 
         return "\n".join(parts)
 
-    # ------------------------------------------------ #
-    # Formula heuristic                                #
-    # ------------------------------------------------ #
-
-    def _apply_basic_formula_heuristics(
-        self,
-        text: str
-    ) -> str:
-
+    def _apply_basic_formula_heuristics(self, text: str) -> str:
         equation_line = re.compile(
-            r"^([A-Za-zΑ-Ωα-ω_\s]+\s*=\s*[^\n]{3,})$",
-            re.MULTILINE
+            r"^([A-Za-z\u0391-\u03C9_\s]+\s*=\s*[^\n]{3,})$",
+            re.MULTILINE,
         )
 
         def wrap_equation(m):
             expr = m.group(1).strip()
-
             if "$" in expr:
                 return m.group(0)
-
-            if re.fullmatch(
-                r"[A-Za-z\s]+=\s*[A-Za-z\s]+",
-                expr
-            ):
+            if re.fullmatch(r"[A-Za-z\s]+=\s*[A-Za-z\s]+", expr):
                 return m.group(0)
-
             return f"$$\n{expr}\n$$"
 
-        return equation_line.sub(
-            wrap_equation,
-            text
-        )
+        return equation_line.sub(wrap_equation, text)
 
-    # ------------------------------------------------ #
-    # Metadata                                         #
-    # ------------------------------------------------ #
-
-    def add_metadata_section(
-        self,
-        markdown: str,
-        metadata: Dict
-    ) -> str:
-
+    def add_metadata_section(self, markdown: str, metadata: Dict) -> str:
         front_matter = (
             "---\n"
-            f"title: "
-            f"{metadata.get('title', 'Untitled')}\n"
-            f"author: "
-            f"{metadata.get('author', 'Unknown')}\n"
-            f"pages: "
-            f"{metadata.get('page_count', 0)}\n"
+            f"title: {metadata.get('title', 'Untitled')}\n"
+            f"author: {metadata.get('author', 'Unknown')}\n"
+            f"pages: {metadata.get('page_count', 0)}\n"
             "---\n\n"
         )
-
         return front_matter + markdown

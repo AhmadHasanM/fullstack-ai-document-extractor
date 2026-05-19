@@ -154,11 +154,15 @@ function ImageGallery({ images, docId }: { images: string[]; docId: string }) {
     return <p className="text-black/40 text-sm py-10 text-center">Tidak ada gambar ditemukan</p>;
   }
 
+  function imageUrl(filename: string) {
+    return `${API}/api/documents/${docId}/images/${encodeURIComponent(filename)}`;
+  }
+
   return (
     <>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {images.map((img) => {
-          const src = `${API}/outputs/images/${docId}/${img}`;
+          const src = imageUrl(img);
           return (
             <button
               key={img}
@@ -168,6 +172,15 @@ function ImageGallery({ images, docId }: { images: string[]; docId: string }) {
               <img
                 src={src}
                 alt={img}
+                loading="lazy"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  target.style.display = "none";
+                  const parent = target.parentElement;
+                  if (parent) {
+                    parent.innerHTML = `<div class="flex items-center justify-center h-full text-black/30 text-xs p-2">${img}</div>`;
+                  }
+                }}
                 className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
               />
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition flex items-center justify-center">
@@ -194,6 +207,17 @@ function ImageGallery({ images, docId }: { images: string[]; docId: string }) {
             alt="preview"
             className="max-w-full max-h-full object-contain rounded-xl"
             onClick={(e) => e.stopPropagation()}
+            onError={(e) => {
+              const target = e.currentTarget;
+              target.style.display = "none";
+              const container = target.parentElement;
+              if (container) {
+                const msg = document.createElement("p");
+                msg.className = "text-white/50 text-sm";
+                msg.textContent = "Gambar tidak dapat dimuat";
+                container.appendChild(msg);
+              }
+            }}
           />
         </div>
       )}

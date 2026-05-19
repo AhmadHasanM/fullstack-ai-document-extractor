@@ -85,6 +85,10 @@ func main() {
 		api.POST("/auth/login", authRateLimiter.Limit(), authHandler.Login)
 		api.GET("/auth/me", middleware.AuthMiddleware(cfg), authHandler.Me)
 
+		// Public document image serving (accessed by <img> tags, no JWT possible)
+		// Security: document IDs are UUIDs (unguessable), path traversal is blocked
+		api.GET("/documents/:id/images/:filename", documentHandler.ServeImage)
+
 		// Protected routes - require authentication
 		protected := api.Group("")
 		protected.Use(middleware.AuthMiddleware(cfg))

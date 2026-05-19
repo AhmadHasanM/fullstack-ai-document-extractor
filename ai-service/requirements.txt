@@ -5,33 +5,27 @@ python-multipart
 # PDF Processing
 pymupdf
 pdfplumber
-pypdf2
-
-# OCR - GOT-OCR2.0
-accelerate
 
 # Image processing
 Pillow
-opencv-python-headless
-pdf2image
 
-# AI
-google-genai
+# DeepSeek OCR2 — Local OCR Engine
+easyocr
+psutil
 
-# Table Transformer (Microsoft)
+# AI (optional: markdown formatting & QA)
+google-generativeai
+
+# Embedding (sentence-transformers fallback uses torch + transformers)
 torch
-torchvision
-transformers
-timm
-
-# NLP / Chunking
+transformers>=4.56.1
 sentence-transformers
 numpy
-scikit-learn
 
 # Utilities
 pydantic
 pydantic-settings
-python-dotenv
-aiofiles
-tqdm
+
+# Infrastructure
+pika
+asyncpg

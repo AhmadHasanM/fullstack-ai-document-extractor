@@ -1,287 +1,162 @@
+"""
+OCR Processor — thin wrapper around DeepSeek OCR2 Local Service.
+Backward compatible dengan interface lama (Surya OCR).
+
+Semua inference lokal via GPU/CPU, tidak ada cloud API.
+"""
+
 import os
 import logging
-from PIL import Image
 from typing import List, Dict
+
+import numpy as np
+from PIL import Image
+
+from ..services.deepseek_ocr_service import (
+    DeepSeekOCRService,
+    DeepSeekOCRConfig,
+    prepare_image_for_ocr,
+    normalize_easyocr_result,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class OCRProcessor:
     """
-    OCR Processor menggunakan Surya OCR.
+    OCR Processor — menggunakan DeepSeek OCR2 lokal di belakang layar.
 
-    Support:
-    - OCR halaman scan
-    - Multi line text
-    - Fallback aman jika model gagal load
+    Interface backward-compatible dengan OCRProcessor lama.
+    Semua inference GPU-first dengan fallback CPU.
     """
 
     def __init__(self, api_key: str = None):
-        # api_key dipertahankan agar kompatibel
-        self.detector = None
-        self.recognizer = None
-        self.foundation = None
-        self.loaded = False
+        self.api_key = api_key
+        config = DeepSeekOCRConfig(
+            device="cuda" if __import__("torch").cuda.is_available() else "cpu",
+        )
+        self._service = DeepSeekOCRService(config)
+        self._pdf_path = None
 
-    # ------------------------------------------------ #
-    # Load model                                       #
-    # ------------------------------------------------ #
+    def set_pdf_path(self, pdf_path: str):
+        self._pdf_path = pdf_path
 
-    def _load_model(self):
-        if self.loaded:
-            return
+    def _ocr_pil_image(self, pil_img: Image.Image, page_number: int = 1) -> Dict:
+        """
+        OCR langsung dari PIL Image tanpa melalui fitz.
 
-        try:
-            from surya.detection import DetectionPredictor
-            from surya.foundation import FoundationPredictor
-            from surya.recognition import RecognitionPredictor
+        1. PIL.Image → numpy.ndarray
+        2. Validasi + konversi (grayscale/RGBA → RGB)
+        3. EasyOCR reader.readtext()
+        """
+        reader = self._service._get_ocr_reader()
 
-            logger.info(
-                "[OCRProcessor] Loading Surya OCR..."
-            )
+        # Convert PIL → numpy → validasi
+        img_array = np.array(pil_img.convert("RGB"))
+        ocr_input = prepare_image_for_ocr(img_array, f"direct image page {page_number}")
 
-            self.foundation = FoundationPredictor()
+        results = reader.readtext(
+            ocr_input,
+            paragraph=True,
+            width_ths=0.7,
+            height_ths=0.7,
+        )
 
-            self.detector = DetectionPredictor()
+        blocks = []
+        full_text_parts = []
+        total_confidence = 0.0
 
-            self.recognizer = RecognitionPredictor(
-                foundation_predictor=self.foundation
-            )
+        for result in results:
+            bbox, text, confidence = normalize_easyocr_result(result)
 
-            self.loaded = True
+            if not text or not text.strip():
+                continue
 
-            logger.info(
-                "[OCRProcessor] Surya OCR loaded."
-            )
+            if bbox is not None:
+                x_coords = [p[0] for p in bbox]
+                y_coords = [p[1] for p in bbox]
+                bbox_out = [
+                    round(min(x_coords), 2),
+                    round(min(y_coords), 2),
+                    round(max(x_coords), 2),
+                    round(max(y_coords), 2),
+                ]
+            else:
+                bbox_out = [0, 0, 0, 0]
 
-        except Exception as e:
-            logger.error(
-                f"[OCRProcessor] Failed load Surya OCR: {e}"
-            )
-            raise e
+            conf_value = round(float(confidence), 4) if confidence is not None else None
 
-    # ------------------------------------------------ #
-    # OCR core                                         #
-    # ------------------------------------------------ #
+            blocks.append({
+                "type": "text",
+                "bbox": bbox_out,
+                "content": text.strip(),
+                "confidence": conf_value,
+            })
+            full_text_parts.append(text.strip())
+            if confidence is not None:
+                total_confidence += float(confidence)
 
-    def _ocr_image(
-        self,
-        image: Image.Image
-    ) -> str:
+        avg_confidence = total_confidence / len(blocks) if blocks else 0.0
 
-        self._load_model()
+        return {
+            "text": "\n".join(full_text_parts),
+            "blocks": blocks,
+            "confidence": round(avg_confidence, 4),
+        }
 
-        try:
-            # API Surya 0.17.x:
-            # recognizer pakai detector predictor langsung
-            recognition = self.recognizer(
-                [image],
-                det_predictor=self.detector
-            )
-
-            lines = []
-
-            for page in recognition:
-                text_lines = getattr(
-                    page,
-                    "text_lines",
-                    []
-                )
-
-                for line in text_lines:
-                    text = getattr(
-                        line,
-                        "text",
-                        ""
-                    ).strip()
-
-                    if text:
-                        lines.append(text)
-
-            return "\n".join(lines).strip()
-
-        except Exception as e:
-            logger.error(
-                f"[OCRProcessor] OCR inference error: {e}"
-            )
-            return ""
-
-    # ------------------------------------------------ #
-    # Public methods                                   #
-    # ------------------------------------------------ #
-
-    def process_image(
-        self,
-        image_path: str
-    ) -> Dict:
-        """OCR file gambar"""
-
+    def process_image(self, image_path: str) -> Dict:
+        """OCR satu file gambar via DeepSeek OCR2."""
         try:
             if not os.path.exists(image_path):
-                return {
-                    "text": "",
-                    "confidence": "low",
-                    "error": (
-                        f"file not found: "
-                        f"{image_path}"
-                    )
-                }
+                return {"text": "", "confidence": "low",
+                        "error": f"file not found: {image_path}"}
 
-            image = (
-                Image.open(image_path)
-                .convert("RGB")
-            )
+            if image_path.lower().endswith(".pdf"):
+                import fitz
+                doc = fitz.open(image_path)
+                page = doc[0]
+                result = self._service._ocr_page_image(page, 1)
+                doc.close()
+            else:
+                img = Image.open(image_path).convert("RGB")
+                result = self._ocr_pil_image(img, 1)
 
-            text = self._ocr_image(image)
+            text = result.get("text", "")
+            confidence = result.get("confidence", 0)
 
             return {
                 "text": text,
-                "confidence": (
-                    "high"
-                    if text else "low"
-                ),
-                "error": None
+                "confidence": "high" if confidence > 0.5 else "medium",
+                "error": None,
+                "blocks": result.get("blocks", []),
             }
 
         except Exception as e:
-            logger.error(
-                f"[OCRProcessor] process_image error: {e}"
-            )
+            logger.error(f"[OCRProcessor] process_image error: {e}")
+            return {"text": "", "confidence": "low", "error": str(e)}
 
-            return {
-                "text": "",
-                "confidence": "low",
-                "error": str(e)
-            }
+    def process_pdf_page(self, page_image_path: str) -> Dict:
+        """OCR halaman PDF dari file gambar PNG."""
+        return self.process_image(page_image_path)
 
-    def process_pdf_page(
-        self,
-        page_image_path: str
-    ) -> Dict:
-        """OCR halaman PDF hasil convert PNG"""
-        return self.process_image(
-            page_image_path
-        )
-
-    # ------------------------------------------------ #
-    # Table extraction sederhana                       #
-    # ------------------------------------------------ #
-
-    def extract_tables_from_image(
-        self,
-        image_path: str
-    ) -> List[Dict]:
-
+    def extract_tables_from_image(self, image_path: str) -> List[Dict]:
+        """Ekstrak tabel dari gambar via DeepSeek OCR2."""
         try:
-            result = self.process_image(
-                image_path
+            blocks = self._service._detect_tables_from_blocks(
+                self._load_blocks_from_image(image_path), page_number=1
             )
-
-            text = result.get(
-                "text",
-                ""
-            )
-
-            if not text.strip():
-                return []
-
-            lines = [
-                line.strip()
-                for line in text.split("\n")
-                if line.strip()
-            ]
-
-            table_rows = []
-
-            for line in lines:
-                normalized = (
-                    line.replace(
-                        "\t",
-                        "  "
-                    )
-                )
-
-                cols = [
-                    c.strip()
-                    for c in normalized.split(
-                        "  "
-                    )
-                    if c.strip()
-                ]
-
-                if len(cols) >= 2:
-                    table_rows.append(cols)
-
-            if not table_rows:
-                return []
-
-            max_cols = max(
-                len(row)
-                for row in table_rows
-            )
-
-            normalized_rows = []
-
-            for row in table_rows:
-                padded = row + (
-                    [""] * (
-                        max_cols - len(row)
-                    )
-                )
-
-                normalized_rows.append(
-                    padded
-                )
-
-            markdown_rows = []
-
-            for row in normalized_rows:
-                markdown_rows.append(
-                    "| "
-                    + " | ".join(row)
-                    + " |"
-                )
-
-            separator = (
-                "| "
-                + " | ".join(
-                    ["---"] * max_cols
-                )
-                + " |"
-            )
-
-            markdown_rows.insert(
-                1,
-                separator
-            )
-
-            return [{
-                "index": 0,
-                "page_number": 1,
-                "method": "surya-ocr",
-                "markdown": "\n".join(
-                    markdown_rows
-                )
-            }]
-
+            return blocks
         except Exception as e:
-            logger.error(
-                f"[OCRProcessor] "
-                f"extract_tables error: {e}"
-            )
-
+            logger.error(f"[OCRProcessor] extract_tables error: {e}")
             return []
 
-    # ------------------------------------------------ #
-    # Formula extraction placeholder                   #
-    # ------------------------------------------------ #
+    def _load_blocks_from_image(self, image_path: str) -> List[Dict]:
+        result = self.process_image(image_path)
+        return result.get("blocks", [])
 
-    def extract_formulas(
-        self,
-        image_path: str
-    ) -> List[str]:
-        """
-        Surya bukan OCR rumus khusus.
-        Return kosong agar kompatibel.
-        """
+    def extract_formulas(self, image_path: str) -> List[str]:
         return []
+
+    @property
+    def service(self) -> DeepSeekOCRService:
+        return self._service

@@ -255,6 +255,36 @@ func (h *DocumentHandler) GetImages(c *gin.Context) {
 	})
 }
 
+func (h *DocumentHandler) ServeImage(c *gin.Context) {
+	id := c.Param("id")
+	filename := c.Param("filename")
+
+	// Validate: block path traversal
+	if strings.Contains(filename, "..") || strings.Contains(filename, "/") || strings.Contains(filename, "\\") {
+		c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error:   "forbidden",
+			Message: "Access denied",
+		})
+		return
+	}
+
+	// Construct path: {outputsDir}/images/{docId}/{filename}
+	imagesDir := filepath.Join(h.config.OutputsDir, "images", id)
+	fullPath := filepath.Join(imagesDir, filename)
+
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		fmt.Printf("[ServeImage] 404: %s\n", fullPath)
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "not_found",
+			Message: "Image file not found",
+		})
+		return
+	}
+
+	fmt.Printf("[ServeImage] 200: %s\n", fullPath)
+	c.File(fullPath)
+}
+
 func (h *DocumentHandler) ServeOutput(c *gin.Context) {
 	userID := c.GetString("user_id")
 	if userID == "" {

@@ -1,14 +1,14 @@
 # src/services/__init__.py
 """
-Services module initialization.
-Avoid importing here to prevent circular imports.
+Services module.
+DeepSeek OCR2 — local OCR engine with GPU support.
 """
 
 __all__ = [
     "DocumentChunker",
     "MarkdownFormatter",
     "QueueConsumer",
-    "QAService"
+    "QAService",
+    "DeepSeekOCRService",
+    "DeepSeekOCRConfig",
 ]
-
-# JANGAN import class di sini untuk menghindari circular import
